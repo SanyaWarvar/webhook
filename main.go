@@ -82,21 +82,20 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
-	fmt.Println(string(body))
-	// Извлекаем данные и подпись из запроса
-	data := r.PostFormValue("data")
-	sign := r.PostFormValue("sign")
-
+	var data struct {
+		Data string `json:"data"`
+		Sign string `json:"sign"`
+	}
+	err = json.Unmarshal(body, &data)
 	// Декодируем данные из Base64
-	decodedData, err := base64.StdEncoding.DecodeString(data)
+	fmt.Println(string(body))
+	decodedData, err := base64.StdEncoding.DecodeString(data.Data)
 	if err != nil {
 		http.Error(w, "Failed to decode data", http.StatusBadRequest)
 		return
 	}
 
-	// Проверяем подпись
-	expectedSign := generateHMAC(decodedData, os.Getenv("secret"))
-	if sign != expectedSign {
+	if !VerifyResponseSignature([]byte(data.Data), data.Sign, os.Getenv("secret")) {
 		http.Error(w, "Invalid signature", http.StatusUnauthorized)
 		return
 	}
@@ -131,4 +130,26 @@ func main() {
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func CalculateSignatureHashHmac(body []byte, secret string) string {
+	mac := hmac.New(md5.New, []byte(secret))
+	mac.Write(body)
+	return fmt.Sprintf("%x", mac.Sum(nil))
+}
+
+func VerifyResponseSignature(data []byte, receivedSign, secret string) bool {
+	h := hmac.New(md5.New, []byte(secret))
+	h.Write(data)
+	expectedSign := fmt.Sprintf("%x", h.Sum(nil))
+	fmt.Println("signature verify", hmac.Equal([]byte(expectedSign), []byte(receivedSign)))
+	return hmac.Equal([]byte(expectedSign), []byte(receivedSign))
+}
+
+func EncodeToString(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
+}
+
+func DecodeString(encodedData string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(encodedData)
 }
